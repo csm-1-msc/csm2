@@ -1,0 +1,9 @@
+description: ESP32-S3-EYE Watch UI with Fluid Animation
+
+dependencies:
+  esp32_s3_eye:
+    version: '*'
+    override_path: d:/prj/esp-bsp-master/bsp/esp32_s3_eye
+  espressif/esp_lvgl_port: ^2.3.1
+  idf:
+    version: '>=5.0'
