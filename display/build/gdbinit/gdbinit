@@ -1,0 +1,2 @@
+source D:/prj/esp-bsp-master/examples/display/build/gdbinit/symbols
+source D:/prj/esp-bsp-master/examples/display/build/gdbinit/connect

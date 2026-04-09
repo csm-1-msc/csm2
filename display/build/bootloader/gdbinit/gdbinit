@@ -1,0 +1,2 @@
+source D:/prj/esp-bsp-master/examples/display/build/bootloader/gdbinit/symbols
+source D:/prj/esp-bsp-master/examples/display/build/bootloader/gdbinit/connect
