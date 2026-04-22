@@ -36,15 +36,16 @@ static lv_obj_t *g_time_label = NULL;
 static lv_obj_t *g_date_label = NULL;
 static lv_obj_t *g_weekday_label = NULL;
 
-// Watch style colors: Modern(blue), Classic(gold), Minimal(white), Digital(green)
+// Watch style colors: Modern(blue), Classic(gold), Minimal(white), Digital(green), Passion(red)
 static const struct {
     uint32_t primary;
     uint32_t bg;
-} STYLE_COLORS[4] = {
-    {0x00AFFF, 0x0a0a2a},    // Modern: Blue
-    {0xFFD700, 0x2a1a00},    // Classic: Gold
-    {0xFFFFFF, 0x0a0a0a},    // Minimal: White/Black
-    {0x00FF00, 0x001a0a}     // Digital: Green
+} STYLE_COLORS[5] = {
+    {0x00AFFF, 0x0a0a2a},    // 0: Modern: Blue
+    {0xFFD700, 0x2a1a00},    // 1: Classic: Gold
+    {0xFFFFFF, 0x0a0a0a},    // 2: Minimal: White/Black
+    {0x00FF00, 0x001a0a},    // 3: Digital: Green
+    {0xFF3333, 0x1a0a0a}     // 4: Passion: Red
 };
 
 // Fluid simulation parameters
@@ -339,7 +340,8 @@ void example_lvgl_demo_ui(lv_obj_t *scr)
 
 void watch_switch_style(void)
 {
-    g_watch_style = (g_watch_style + 1) % 4;
+    // 5-gear closed-loop infinite cycle: 0→1→2→3→4→0→...
+    g_watch_style = (g_watch_style + 1) % 5;
     ESP_LOGI(TAG, "Switching to style %d", g_watch_style);
     if (g_ui_state == UI_STATE_WATCH) {
         lv_obj_t *scr = lv_disp_get_scr_act(NULL);
