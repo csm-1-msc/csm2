@@ -38,6 +38,9 @@ static lv_obj_t *g_time_label = NULL;
 static lv_obj_t *g_date_label = NULL;
 static lv_obj_t *g_weekday_label = NULL;
 
+// Flag to track if we're in fluid mode
+static bool g_in_fluid_mode = false;
+
 // Watch style colors: 4 colors for watch UI (style 4 is fluid animation)
 static const struct {
     uint32_t primary;
@@ -98,12 +101,17 @@ static void update_labels(void)
 static void timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    g_current_ts++;
-    update_labels();
+    // Only update labels if not in fluid mode and labels exist
+    if (!g_in_fluid_mode && g_time_label && g_date_label && g_weekday_label) {
+        g_current_ts++;
+        update_labels();
+    }
 }
 
 static void create_watch_ui(lv_obj_t *scr)
 {
+    g_in_fluid_mode = false;
+    
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
@@ -166,9 +174,10 @@ static void create_watch_ui(lv_obj_t *scr)
 
     update_labels();
 
-    // Create/update timer
+    // Create/update timer - delete old timer first
     if (g_watch_timer) {
         lv_timer_del(g_watch_timer);
+        g_watch_timer = NULL;
     }
     g_watch_timer = lv_timer_create(timer_cb, 1000, NULL);
 }
@@ -302,19 +311,31 @@ static void fluid_timer_cb(lv_timer_t *timer)
 
 static void create_fluid_ui(lv_obj_t *scr)
 {
+    // Stop watch timer FIRST before cleaning screen
+    if (g_watch_timer) {
+        lv_timer_del(g_watch_timer);
+        g_watch_timer = NULL;
+    }
+    g_in_fluid_mode = true;
+    
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x0a0a1a), 0);
 
     fluid_init();
 
+    // Create canvas with explicit parent
     g_fluid_canvas = lv_canvas_create(scr);
     lv_canvas_set_buffer(g_fluid_canvas, g_fluid_buf, FLUID_WIDTH, FLUID_HEIGHT, LV_IMG_CF_TRUE_COLOR);
-    lv_obj_center(g_fluid_canvas);
+    lv_obj_align(g_fluid_canvas, LV_ALIGN_CENTER, 0, 0);
 
+    // Delete old fluid timer first
     if (g_fluid_timer) {
         lv_timer_del(g_fluid_timer);
+        g_fluid_timer = NULL;
     }
-    g_fluid_timer = lv_timer_create(fluid_timer_cb, 30, NULL);
+    g_fluid_timer = lv_timer_create(fluid_timer_cb, 33, NULL);
+    
+    ESP_LOGI(TAG, "Fluid UI created with %d particles", FLUID_NUM_PARTICLES);
 }
 
 static void destroy_fluid_ui(void)
@@ -323,6 +344,7 @@ static void destroy_fluid_ui(void)
         lv_timer_del(g_fluid_timer);
         g_fluid_timer = NULL;
     }
+    g_in_fluid_mode = false;
     if (g_px) { free(g_px); g_px = NULL; }
     if (g_py) { free(g_py); g_py = NULL; }
     if (g_pvx) { free(g_pvx); g_pvx = NULL; }
@@ -368,6 +390,8 @@ void watch_switch_style(void)
             g_watch_style = STYLE_INITIAL;
             ESP_LOGI(TAG, "Switch to STYLE_INITIAL");
             destroy_fluid_ui();
+            // Re-initialize time when switching back to watch
+            init_time();
             create_watch_ui(scr);
             break;
     }
