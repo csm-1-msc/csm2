@@ -102,15 +102,11 @@ static void timer_cb(lv_timer_t *timer)
 {
     (void)timer;
     // Only update labels if not in fluid mode and all labels exist
-    // Double-check: also verify labels are still valid (not deleted)
-    if (!g_in_fluid_mode && g_time_label && g_date_label && g_weekday_label) {
-        // Additional check: verify labels are still part of a valid object tree
-        if (lv_obj_get_parent(g_time_label) != NULL && 
-            lv_obj_get_parent(g_date_label) != NULL && 
-            lv_obj_get_parent(g_weekday_label) != NULL) {
-            g_current_ts++;
-            update_labels();
-        }
+    // Also check if this timer is still the active g_watch_timer
+    if (!g_in_fluid_mode && g_watch_timer == timer && 
+        g_time_label && g_date_label && g_weekday_label) {
+        g_current_ts++;
+        update_labels();
     }
 }
 
