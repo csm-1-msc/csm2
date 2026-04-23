@@ -21,12 +21,14 @@
 static const char *TAG = "watch_ui";
 
 typedef enum {
-    UI_STATE_WATCH = 0,
-    UI_STATE_FLUID
-} ui_state_t;
+    STYLE_INITIAL = 0,    // 初始状态：默认颜色
+    STYLE_COLOR1,         // 第 1 次按键：颜色 1
+    STYLE_COLOR2,         // 第 2 次按键：颜色 2
+    STYLE_COLOR3,         // 第 3 次按键：颜色 3
+    STYLE_FLUID           // 第 4 次按键：流体动画
+} watch_style_t;
 
-static ui_state_t g_ui_state = UI_STATE_WATCH;
-static int g_watch_style = 0;
+static watch_style_t g_watch_style = STYLE_INITIAL;
 static time_t g_current_ts = 0;
 
 static lv_timer_t *g_watch_timer = NULL;
@@ -36,16 +38,15 @@ static lv_obj_t *g_time_label = NULL;
 static lv_obj_t *g_date_label = NULL;
 static lv_obj_t *g_weekday_label = NULL;
 
-// Watch style colors: Modern(blue), Classic(gold), Minimal(white), Digital(green), Passion(red)
+// Watch style colors: 4 colors for watch UI (style 4 is fluid animation)
 static const struct {
     uint32_t primary;
     uint32_t bg;
-} STYLE_COLORS[5] = {
-    {0x00AFFF, 0x0a0a2a},    // 0: Modern: Blue
-    {0xFFD700, 0x2a1a00},    // 1: Classic: Gold
-    {0xFFFFFF, 0x0a0a0a},    // 2: Minimal: White/Black
-    {0x00FF00, 0x001a0a},    // 3: Digital: Green
-    {0xFF3333, 0x1a0a0a}     // 4: Passion: Red
+} STYLE_COLORS[4] = {
+    {0x00AFFF, 0x0a0a2a},    // STYLE_INITIAL: Modern: Blue
+    {0xFFD700, 0x2a1a00},    // STYLE_COLOR1: Classic: Gold
+    {0xFFFFFF, 0x0a0a0a},    // STYLE_COLOR2: Minimal: White/Black
+    {0x00FF00, 0x001a0a}     // STYLE_COLOR3: Digital: Green
 };
 
 // Fluid simulation parameters
@@ -332,39 +333,48 @@ static void destroy_fluid_ui(void)
 
 void example_lvgl_demo_ui(lv_obj_t *scr)
 {
-    g_ui_state = UI_STATE_WATCH;
-    g_watch_style = 0;
+    g_watch_style = STYLE_INITIAL;
     init_time();
     create_watch_ui(scr);
 }
 
 void watch_switch_style(void)
 {
-    // 5-gear closed-loop infinite cycle: 0→1→2→3→4→0→...
-    g_watch_style = (g_watch_style + 1) % 5;
-    ESP_LOGI(TAG, "Switching to style %d", g_watch_style);
-    if (g_ui_state == UI_STATE_WATCH) {
-        lv_obj_t *scr = lv_disp_get_scr_act(NULL);
-        create_watch_ui(scr);
+    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
+    
+    // 5 段循环：初始→颜色 1→颜色 2→颜色 3→流体→初始→...
+    switch (g_watch_style) {
+        case STYLE_INITIAL:
+            g_watch_style = STYLE_COLOR1;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR1");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR1:
+            g_watch_style = STYLE_COLOR2;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR2");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR2:
+            g_watch_style = STYLE_COLOR3;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR3");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR3:
+            g_watch_style = STYLE_FLUID;
+            ESP_LOGI(TAG, "Switch to STYLE_FLUID");
+            create_fluid_ui(scr);
+            break;
+        case STYLE_FLUID:
+            g_watch_style = STYLE_INITIAL;
+            ESP_LOGI(TAG, "Switch to STYLE_INITIAL");
+            destroy_fluid_ui();
+            create_watch_ui(scr);
+            break;
     }
 }
 
 void watch_switch_ui(void)
 {
-    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
-
-    if (g_ui_state == UI_STATE_WATCH) {
-        g_ui_state = UI_STATE_FLUID;
-        if (g_watch_timer) {
-            lv_timer_del(g_watch_timer);
-            g_watch_timer = NULL;
-        }
-        create_fluid_ui(scr);
-        ESP_LOGI(TAG, "Switched to fluid UI");
-    } else {
-        g_ui_state = UI_STATE_WATCH;
-        destroy_fluid_ui();
-        create_watch_ui(scr);
-        ESP_LOGI(TAG, "Switched to watch UI");
-    }
+    // This function is deprecated, use watch_switch_style instead
+    watch_switch_style();
 }
