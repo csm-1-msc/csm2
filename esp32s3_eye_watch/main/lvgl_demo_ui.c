@@ -49,10 +49,10 @@ static const struct {
     {0x00FF00, 0x001a0a}     // STYLE_COLOR3: Digital: Green
 };
 
-// Fluid simulation parameters
-#define FLUID_WIDTH 240
-#define FLUID_HEIGHT 240
-#define FLUID_NUM_PARTICLES 500
+// Fluid simulation parameters - reduced for ESP32-S3-EYE memory constraints
+#define FLUID_WIDTH 160
+#define FLUID_HEIGHT 160
+#define FLUID_NUM_PARTICLES 200
 
 static float *g_px = NULL;
 static float *g_py = NULL;
