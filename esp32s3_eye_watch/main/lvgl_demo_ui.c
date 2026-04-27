@@ -21,12 +21,14 @@
 static const char *TAG = "watch_ui";
 
 typedef enum {
-    UI_STATE_WATCH = 0,
-    UI_STATE_FLUID
-} ui_state_t;
+    STYLE_INITIAL = 0,    // 初始状态：默认颜色
+    STYLE_COLOR1,         // 第 1 次按键：颜色 1
+    STYLE_COLOR2,         // 第 2 次按键：颜色 2
+    STYLE_COLOR3,         // 第 3 次按键：颜色 3
+    STYLE_FLUID           // 第 4 次按键：流体动画
+} watch_style_t;
 
-static ui_state_t g_ui_state = UI_STATE_WATCH;
-static int g_watch_style = 0;
+static watch_style_t g_watch_style = STYLE_INITIAL;
 static time_t g_current_ts = 0;
 
 static lv_timer_t *g_watch_timer = NULL;
@@ -36,21 +38,24 @@ static lv_obj_t *g_time_label = NULL;
 static lv_obj_t *g_date_label = NULL;
 static lv_obj_t *g_weekday_label = NULL;
 
-// Watch style colors: Modern(blue), Classic(gold), Minimal(white), Digital(green)
+// Flag to track if we're in fluid mode
+static bool g_in_fluid_mode = false;
+
+// Watch style colors: 4 colors for watch UI (style 4 is fluid animation)
 static const struct {
     uint32_t primary;
     uint32_t bg;
 } STYLE_COLORS[4] = {
-    {0x00AFFF, 0x0a0a2a},    // Modern: Blue
-    {0xFFD700, 0x2a1a00},    // Classic: Gold
-    {0xFFFFFF, 0x0a0a0a},    // Minimal: White/Black
-    {0x00FF00, 0x001a0a}     // Digital: Green
+    {0x00AFFF, 0x0a0a2a},    // STYLE_INITIAL: Modern: Blue
+    {0xFFD700, 0x2a1a00},    // STYLE_COLOR1: Classic: Gold
+    {0xFFFFFF, 0x0a0a0a},    // STYLE_COLOR2: Minimal: White/Black
+    {0x00FF00, 0x001a0a}     // STYLE_COLOR3: Digital: Green
 };
 
-// Fluid simulation parameters
-#define FLUID_WIDTH 240
-#define FLUID_HEIGHT 240
-#define FLUID_NUM_PARTICLES 500
+// Fluid simulation parameters - reduced for ESP32-S3-EYE memory constraints
+#define FLUID_WIDTH 160
+#define FLUID_HEIGHT 160
+#define FLUID_NUM_PARTICLES 200
 
 static float *g_px = NULL;
 static float *g_py = NULL;
@@ -96,12 +101,19 @@ static void update_labels(void)
 static void timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    g_current_ts++;
-    update_labels();
+    // Only update labels if not in fluid mode and all labels exist
+    // Also check if this timer is still the active g_watch_timer
+    if (!g_in_fluid_mode && g_watch_timer == timer && 
+        g_time_label && g_date_label && g_weekday_label) {
+        g_current_ts++;
+        update_labels();
+    }
 }
 
 static void create_watch_ui(lv_obj_t *scr)
 {
+    g_in_fluid_mode = false;
+    
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
@@ -164,9 +176,10 @@ static void create_watch_ui(lv_obj_t *scr)
 
     update_labels();
 
-    // Create/update timer
+    // Create/update timer - delete old timer first
     if (g_watch_timer) {
         lv_timer_del(g_watch_timer);
+        g_watch_timer = NULL;
     }
     g_watch_timer = lv_timer_create(timer_cb, 1000, NULL);
 }
@@ -300,19 +313,31 @@ static void fluid_timer_cb(lv_timer_t *timer)
 
 static void create_fluid_ui(lv_obj_t *scr)
 {
+    // Stop watch timer FIRST before cleaning screen
+    if (g_watch_timer) {
+        lv_timer_del(g_watch_timer);
+        g_watch_timer = NULL;
+    }
+    g_in_fluid_mode = true;
+    
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x0a0a1a), 0);
 
     fluid_init();
 
+    // Create canvas with explicit parent
     g_fluid_canvas = lv_canvas_create(scr);
     lv_canvas_set_buffer(g_fluid_canvas, g_fluid_buf, FLUID_WIDTH, FLUID_HEIGHT, LV_IMG_CF_TRUE_COLOR);
-    lv_obj_center(g_fluid_canvas);
+    lv_obj_align(g_fluid_canvas, LV_ALIGN_CENTER, 0, 0);
 
+    // Delete old fluid timer first
     if (g_fluid_timer) {
         lv_timer_del(g_fluid_timer);
+        g_fluid_timer = NULL;
     }
-    g_fluid_timer = lv_timer_create(fluid_timer_cb, 30, NULL);
+    g_fluid_timer = lv_timer_create(fluid_timer_cb, 33, NULL);
+    
+    ESP_LOGI(TAG, "Fluid UI created with %d particles", FLUID_NUM_PARTICLES);
 }
 
 static void destroy_fluid_ui(void)
@@ -321,6 +346,7 @@ static void destroy_fluid_ui(void)
         lv_timer_del(g_fluid_timer);
         g_fluid_timer = NULL;
     }
+    g_in_fluid_mode = false;
     if (g_px) { free(g_px); g_px = NULL; }
     if (g_py) { free(g_py); g_py = NULL; }
     if (g_pvx) { free(g_pvx); g_pvx = NULL; }
@@ -331,38 +357,50 @@ static void destroy_fluid_ui(void)
 
 void example_lvgl_demo_ui(lv_obj_t *scr)
 {
-    g_ui_state = UI_STATE_WATCH;
-    g_watch_style = 0;
+    g_watch_style = STYLE_INITIAL;
     init_time();
     create_watch_ui(scr);
 }
 
 void watch_switch_style(void)
 {
-    g_watch_style = (g_watch_style + 1) % 4;
-    ESP_LOGI(TAG, "Switching to style %d", g_watch_style);
-    if (g_ui_state == UI_STATE_WATCH) {
-        lv_obj_t *scr = lv_disp_get_scr_act(NULL);
-        create_watch_ui(scr);
+    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
+    
+    // 5 段循环：初始→颜色 1→颜色 2→颜色 3→流体→初始→...
+    switch (g_watch_style) {
+        case STYLE_INITIAL:
+            g_watch_style = STYLE_COLOR1;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR1");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR1:
+            g_watch_style = STYLE_COLOR2;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR2");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR2:
+            g_watch_style = STYLE_COLOR3;
+            ESP_LOGI(TAG, "Switch to STYLE_COLOR3");
+            create_watch_ui(scr);
+            break;
+        case STYLE_COLOR3:
+            g_watch_style = STYLE_FLUID;
+            ESP_LOGI(TAG, "Switch to STYLE_FLUID");
+            create_fluid_ui(scr);
+            break;
+        case STYLE_FLUID:
+            g_watch_style = STYLE_INITIAL;
+            ESP_LOGI(TAG, "Switch to STYLE_INITIAL");
+            destroy_fluid_ui();
+            // Re-initialize time when switching back to watch
+            init_time();
+            create_watch_ui(scr);
+            break;
     }
 }
 
 void watch_switch_ui(void)
 {
-    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
-
-    if (g_ui_state == UI_STATE_WATCH) {
-        g_ui_state = UI_STATE_FLUID;
-        if (g_watch_timer) {
-            lv_timer_del(g_watch_timer);
-            g_watch_timer = NULL;
-        }
-        create_fluid_ui(scr);
-        ESP_LOGI(TAG, "Switched to fluid UI");
-    } else {
-        g_ui_state = UI_STATE_WATCH;
-        destroy_fluid_ui();
-        create_watch_ui(scr);
-        ESP_LOGI(TAG, "Switched to watch UI");
-    }
+    // This function is deprecated, use watch_switch_style instead
+    watch_switch_style();
 }
