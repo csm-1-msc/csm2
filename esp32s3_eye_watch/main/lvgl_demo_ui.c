@@ -30,6 +30,7 @@ typedef enum {
 
 static watch_style_t g_watch_style = STYLE_INITIAL;
 static time_t g_current_ts = 0;
+static bool g_time_initialized = false;  // Track if time has been synced from NTP
 
 static lv_timer_t *g_watch_timer = NULL;
 static lv_timer_t *g_fluid_timer = NULL;
@@ -55,18 +56,24 @@ static const struct {
 // Fluid simulation parameters - reduced for ESP32-S3-EYE memory constraints
 #define FLUID_WIDTH 160
 #define FLUID_HEIGHT 160
-#define FLUID_NUM_PARTICLES 200
+#define FLUID_NUM_PARTICLES 150
 
 static float *g_px = NULL;
 static float *g_py = NULL;
 static float *g_pvx = NULL;
 static float *g_pvy = NULL;
-static uint8_t *g_fluid_buf = NULL;
+static uint8_t *g_fluid_buf = NULL;  // Raw buffer for LVGL canvas
 static lv_obj_t *g_fluid_canvas = NULL;
 
 static void init_time(void)
 {
-    // Fixed start time: 2026-04-08 12:00:00
+    if (g_time_initialized) {
+        // Time already initialized from NTP, just increment by 1 second
+        g_current_ts++;
+        return;
+    }
+    
+    // Fixed start time: 2026-04-08 12:00:00 (fallback before NTP sync)
     struct tm timeinfo = {0};
     timeinfo.tm_year = 126;  // 2026 - 1900
     timeinfo.tm_mon = 3;     // April (0-11)
@@ -75,6 +82,22 @@ static void init_time(void)
     timeinfo.tm_min = 0;
     timeinfo.tm_sec = 0;
     g_current_ts = mktime(&timeinfo);
+    ESP_LOGI(TAG, "Time initialized with fixed time (waiting for NTP)");
+}
+
+// NTP time sync callback - called from main.c when NTP time is received
+void watch_update_time_from_ntp(time_t ts)
+{
+    g_current_ts = ts;
+    g_time_initialized = true;
+    
+    struct tm *timeinfo = localtime(&ts);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
+    ESP_LOGI(TAG, "Time updated from NTP: %s", time_str);
+    
+    // Update UI labels immediately if they exist
+    update_labels();
 }
 
 static void update_labels(void)
@@ -89,12 +112,13 @@ static void update_labels(void)
              timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     if (g_time_label) lv_label_set_text(g_time_label, buf);
 
-    // Date: YYYY MM DD
-    snprintf(buf, sizeof(buf), "2026 04 08");
+    // Date: YYYY MM DD (dynamic based on actual time)
+    snprintf(buf, sizeof(buf), "%04d %02d %02d",
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
     if (g_date_label) lv_label_set_text(g_date_label, buf);
 
-    // Weekday: fixed as "3" (Wednesday)
-    snprintf(buf, sizeof(buf), "3");
+    // Weekday: dynamic (0=Sunday, 1=Monday, ..., 6=Saturday)
+    snprintf(buf, sizeof(buf), "%d", timeinfo.tm_wday);
     if (g_weekday_label) lv_label_set_text(g_weekday_label, buf);
 }
 
@@ -193,26 +217,31 @@ static void fluid_init(void)
     if (g_pvy) free(g_pvy);
     if (g_fluid_buf) free(g_fluid_buf);
 
-    // Allocate memory for 500 particles
+    // Allocate memory for particles
     g_px = (float *)malloc(FLUID_NUM_PARTICLES * sizeof(float));
     g_py = (float *)malloc(FLUID_NUM_PARTICLES * sizeof(float));
     g_pvx = (float *)malloc(FLUID_NUM_PARTICLES * sizeof(float));
     g_pvy = (float *)malloc(FLUID_NUM_PARTICLES * sizeof(float));
-    g_fluid_buf = (uint8_t *)malloc(FLUID_WIDTH * FLUID_HEIGHT * 3);
+    // Allocate raw buffer (RGB565 = 2 bytes per pixel)
+    g_fluid_buf = (uint8_t *)malloc(FLUID_WIDTH * FLUID_HEIGHT * 2);
 
     if (!g_px || !g_py || !g_pvx || !g_pvy || !g_fluid_buf) {
         ESP_LOGE(TAG, "Fluid memory allocation failed");
         return;
     }
 
-    // Initialize particles with random positions
+    // Initialize particles with random positions - spread across entire area
     srand(esp_timer_get_time());
+    int border = 10;  // Keep particles away from border
     for (int i = 0; i < FLUID_NUM_PARTICLES; i++) {
-        g_px[i] = (float)(rand() % FLUID_WIDTH);
-        g_py[i] = (float)(rand() % (FLUID_HEIGHT / 2));
-        g_pvx[i] = ((float)(rand() % 100) - 50.0f) / 50.0f;
-        g_pvy[i] = 0;
+        g_px[i] = (float)(border + (rand() % (FLUID_WIDTH - 2 * border)));
+        g_py[i] = (float)(border + (rand() % (FLUID_HEIGHT - 2 * border)));
+        // Give particles initial velocity
+        g_pvx[i] = ((float)(rand() % 200) - 100.0f) / 20.0f;  // -5 to 5
+        g_pvy[i] = ((float)(rand() % 100) - 50.0f) / 20.0f;   // -2.5 to 2.5
     }
+    
+    ESP_LOGI(TAG, "Fluid initialized with %d particles", FLUID_NUM_PARTICLES);
 }
 
 static void fluid_update(void)
@@ -270,38 +299,74 @@ static void fluid_update(void)
 
 static void fluid_draw(void)
 {
-    if (!g_fluid_buf) return;
+    if (!g_fluid_buf || !g_fluid_canvas) return;
 
-    // Clear buffer to dark background
-    memset(g_fluid_buf, 10, FLUID_WIDTH * FLUID_HEIGHT * 3);
+    // Clear buffer to dark background (dark blue)
+    for (int i = 0; i < FLUID_WIDTH * FLUID_HEIGHT; i++) {
+        g_fluid_buf[i * 2] = 0x0A;
+        g_fluid_buf[i * 2 + 1] = 0x00;
+    }
 
-    // Draw particles
+    // Draw particles with multiple colors
     for (int i = 0; i < FLUID_NUM_PARTICLES; i++) {
         int x = (int)g_px[i];
         int y = (int)g_py[i];
 
-        if (x >= 0 && x < FLUID_WIDTH && y >= 0 && y < FLUID_HEIGHT) {
-            // Draw a small circle for each particle
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dx = -2; dx <= 2; dx++) {
-                    int px = x + dx;
-                    int py = y + dy;
-                    if (px >= 0 && px < FLUID_WIDTH && py >= 0 && py < FLUID_HEIGHT) {
-                        if (dx * dx + dy * dy <= 4) {
-                            int idx = (py * FLUID_WIDTH + px) * 3;
-                            g_fluid_buf[idx] = 0;
-                            g_fluid_buf[idx + 1] = 200;
-                            g_fluid_buf[idx + 2] = 255;
-                        }
-                    }
+        // Skip if outside bounds
+        if (x < 4 || x >= FLUID_WIDTH - 4 || y < 4 || y >= FLUID_HEIGHT - 4) {
+            continue;
+        }
+
+        // Alternate particle colors (cyan, white, yellow) in RGB565
+        uint16_t particle_color;
+        if (i % 3 == 0) {
+            particle_color = 0x07FF;  // Cyan
+        } else if (i % 3 == 1) {
+            particle_color = 0xFFFF;  // White
+        } else {
+            particle_color = 0xFFE0;  // Yellow
+        }
+
+        // Draw a small square for each particle (3x3)
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < FLUID_WIDTH && py >= 0 && py < FLUID_HEIGHT) {
+                    int idx = py * FLUID_WIDTH + px;
+                    g_fluid_buf[idx * 2] = particle_color & 0xFF;
+                    g_fluid_buf[idx * 2 + 1] = particle_color >> 8;
                 }
             }
         }
     }
 
-    if (g_fluid_canvas) {
-        lv_canvas_set_buffer(g_fluid_canvas, g_fluid_buf, FLUID_WIDTH, FLUID_HEIGHT, LV_IMG_CF_TRUE_COLOR);
+    // Draw border (gold: 0xFBE0)
+    uint16_t border_color = 0xFBE0;
+    int bw = 3;
+    for (int y = 0; y < FLUID_HEIGHT; y++) {
+        for (int x = 0; x < bw; x++) {
+            int idx1 = y * FLUID_WIDTH + x;
+            int idx2 = y * FLUID_WIDTH + (FLUID_WIDTH - 1 - x);
+            g_fluid_buf[idx1 * 2] = border_color & 0xFF;
+            g_fluid_buf[idx1 * 2 + 1] = border_color >> 8;
+            g_fluid_buf[idx2 * 2] = border_color & 0xFF;
+            g_fluid_buf[idx2 * 2 + 1] = border_color >> 8;
+        }
     }
+    for (int x = 0; x < FLUID_WIDTH; x++) {
+        for (int y = 0; y < bw; y++) {
+            int idx1 = y * FLUID_WIDTH + x;
+            int idx2 = (FLUID_HEIGHT - 1 - y) * FLUID_WIDTH + x;
+            g_fluid_buf[idx1 * 2] = border_color & 0xFF;
+            g_fluid_buf[idx1 * 2 + 1] = border_color >> 8;
+            g_fluid_buf[idx2 * 2] = border_color & 0xFF;
+            g_fluid_buf[idx2 * 2 + 1] = border_color >> 8;
+        }
+    }
+
+    // Invalidate canvas to trigger redraw
+    lv_obj_invalidate(g_fluid_canvas);
 }
 
 static void fluid_timer_cb(lv_timer_t *timer)
@@ -313,6 +378,8 @@ static void fluid_timer_cb(lv_timer_t *timer)
 
 static void create_fluid_ui(lv_obj_t *scr)
 {
+    ESP_LOGI(TAG, "create_fluid_ui called");
+    
     // Stop watch timer FIRST before cleaning screen
     if (g_watch_timer) {
         lv_timer_del(g_watch_timer);
@@ -323,19 +390,51 @@ static void create_fluid_ui(lv_obj_t *scr)
     lv_obj_clean(scr);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x0a0a1a), 0);
 
-    fluid_init();
+    // Create title label
+    lv_obj_t *title = lv_label_create(scr);
+    lv_label_set_text(title, "Fluid Animation");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
-    // Create canvas with explicit parent
+    fluid_init();
+    
+    if (!g_px || !g_py || !g_pvx || !g_pvy || !g_fluid_buf) {
+        ESP_LOGE(TAG, "Fluid memory allocation failed!");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Fluid memory allocated: buf=%p, size=%d bytes", g_fluid_buf, FLUID_WIDTH * FLUID_HEIGHT * 2);
+
+    // Create canvas
     g_fluid_canvas = lv_canvas_create(scr);
-    lv_canvas_set_buffer(g_fluid_canvas, g_fluid_buf, FLUID_WIDTH, FLUID_HEIGHT, LV_IMG_CF_TRUE_COLOR);
-    lv_obj_align(g_fluid_canvas, LV_ALIGN_CENTER, 0, 0);
+    if (!g_fluid_canvas) {
+        ESP_LOGE(TAG, "Canvas creation failed!");
+        return;
+    }
+    
+    lv_obj_center(g_fluid_canvas);
+    
+    // Set canvas size and buffer
+    lv_canvas_set_buffer(g_fluid_canvas, g_fluid_buf, FLUID_WIDTH, FLUID_HEIGHT, LV_COLOR_FORMAT_RGB565);
+    
+    // Set canvas style to show border
+    lv_obj_set_style_bg_color(g_fluid_canvas, lv_color_hex(0xFFD700), 0);
+    lv_obj_set_style_border_width(g_fluid_canvas, 3, 0);
+    lv_obj_set_style_border_color(g_fluid_canvas, lv_color_hex(0xFFD700), 0);
+    
+    ESP_LOGI(TAG, "Canvas object created at %p", g_fluid_canvas);
 
     // Delete old fluid timer first
     if (g_fluid_timer) {
         lv_timer_del(g_fluid_timer);
         g_fluid_timer = NULL;
     }
-    g_fluid_timer = lv_timer_create(fluid_timer_cb, 33, NULL);
+    g_fluid_timer = lv_timer_create(fluid_timer_cb, 50, NULL);
+    
+    // Force initial draw immediately
+    ESP_LOGI(TAG, "Calling fluid_draw() immediately");
+    fluid_draw();
     
     ESP_LOGI(TAG, "Fluid UI created with %d particles", FLUID_NUM_PARTICLES);
 }
@@ -392,7 +491,7 @@ void watch_switch_style(void)
             g_watch_style = STYLE_INITIAL;
             ESP_LOGI(TAG, "Switch to STYLE_INITIAL");
             destroy_fluid_ui();
-            // Re-initialize time when switching back to watch
+            // Re-initialize time when switching back to watch (will use NTP time if synced)
             init_time();
             create_watch_ui(scr);
             break;
