@@ -7,7 +7,7 @@
 /**
  * @file
  * @brief Simple Display Example with LVGL Watch UI
- * @details ESP32-S3-EYE with LCD display and button to switch watch styles
+ * @details ESP32-S3-EYE with LCD display - Step 1: Project Base
  */
 
 #include <stdio.h>
@@ -16,101 +16,23 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "driver/gpio.h"
 
-// External UI functions
+// External UI function
 extern void example_lvgl_demo_ui(lv_obj_t *scr);
-extern void watch_switch_style(void);
-extern void watch_switch_ui(void);
 
 static const char *TAG = "main";
 
-// Button GPIOs
-#define BUTTON1_GPIO 0   // Left-bottom 1: Switch watch style
-#define BUTTON2_GPIO 14  // Left-bottom 2: Switch UI (watch <-> fluid)
-
-// Semaphores for button ISRs
-static SemaphoreHandle_t button1_sem;
-static SemaphoreHandle_t button2_sem;
-
-// Button ISR - only signal semaphore, do nothing else
-static void IRAM_ATTR button1_isr_handler(void *arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(button1_sem, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static void IRAM_ATTR button2_isr_handler(void *arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(button2_sem, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-// Button handler task
-static void button_handler_task(void *arg)
-{
-    while (1) {
-        // Check button1 with timeout
-        if (xSemaphoreTake(button1_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
-            // Button 1: Switch watch style (with display lock!)
-            bsp_display_lock(0);
-            watch_switch_style();
-            bsp_display_unlock();
-        }
-        // Check button2 with timeout (ensure reliable)
-        if (xSemaphoreTake(button2_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
-            // Button 2: Switch UI (watch <-> fluid) (with display lock!)
-            bsp_display_lock(0);
-            watch_switch_ui();
-            bsp_display_unlock();
-        }
-    }
-}
+/**
+ * @brief Step 1: Project Base
+ * @details Basic display initialization with static watch UI
+ * - No button handling
+ * - No color switching
+ * - No animation
+ */
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== ESP32-S3-EYE Watch with Fluid Animation ===");
-
-    // Create semaphores for button ISRs
-    button1_sem = xSemaphoreCreateBinary();
-    if (button1_sem == NULL) {
-        ESP_LOGE(TAG, "Failed to create button1 semaphore");
-        return;
-    }
-    button2_sem = xSemaphoreCreateBinary();
-    if (button2_sem == NULL) {
-        ESP_LOGE(TAG, "Failed to create button2 semaphore");
-        return;
-    }
-
-    // Initialize button1 GPIO (GPIO0 - Switch watch style)
-    ESP_LOGI(TAG, "Initializing button1 (GPIO0)...");
-    gpio_config_t io_conf = {
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BUTTON1_GPIO),
-        .pull_down_en = 0,
-        .pull_up_en = 1,
-        .intr_type = GPIO_INTR_NEGEDGE,
-    };
-    gpio_config(&io_conf);
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(BUTTON1_GPIO, button1_isr_handler, (void *)BUTTON1_GPIO);
-
-    // Initialize button2 GPIO (GPIO14 - Switch UI)
-    ESP_LOGI(TAG, "Initializing button2 (GPIO14)...");
-    io_conf.pin_bit_mask = (1ULL << BUTTON2_GPIO);
-    gpio_config(&io_conf);
-    gpio_isr_handler_add(BUTTON2_GPIO, button2_isr_handler, (void *)BUTTON2_GPIO);
-
-    // Create button handler task
-    xTaskCreate(button_handler_task, "button_handler", 4096, NULL, 5, NULL);
+    ESP_LOGI(TAG, "=== ESP32-S3-EYE Watch - Step 1: Project Base ===");
 
     // Start display
     ESP_LOGI(TAG, "Starting display...");
@@ -129,9 +51,8 @@ void app_main(void)
     bsp_display_brightness_set(80);
     bsp_display_backlight_on();
 
-    ESP_LOGI(TAG, "Initialization complete!");
-    ESP_LOGI(TAG, "Button1 (GPIO0): Switch watch style");
-    ESP_LOGI(TAG, "Button2 (GPIO14): Switch watch <-> fluid animation");
+    ESP_LOGI(TAG, "Step 1: Initialization complete!");
+    ESP_LOGI(TAG, "Basic watch UI displayed with static time");
 
     // Keep running
     while (1) {
