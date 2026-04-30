@@ -18,11 +18,10 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "driver/gpio.h"
+#include "watch_ui.h"
 
 // External UI functions
 extern void example_lvgl_demo_ui(lv_obj_t *scr);
-extern void watch_switch_style(void);
-extern void watch_switch_ui(void);
 
 static const char *TAG = "main";
 

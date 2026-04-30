@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "lvgl.h"
+#include "watch_ui.h"
 
 #ifndef LV_IMG_CF_TRUE_COLOR
 #define LV_IMG_CF_TRUE_COLOR 0x05
@@ -29,6 +30,7 @@ typedef enum {
 } watch_style_t;
 
 static watch_style_t g_watch_style = STYLE_INITIAL;
+static color_mode_t g_color_mode = COLOR_MODE_AUTO;  // Default to auto mode
 static time_t g_current_ts = 0;
 
 static lv_timer_t *g_watch_timer = NULL;
@@ -362,6 +364,7 @@ void example_lvgl_demo_ui(lv_obj_t *scr)
     create_watch_ui(scr);
 }
 
+// Step 3: Watch style switching (button 1)
 void watch_switch_style(void)
 {
     lv_obj_t *scr = lv_disp_get_scr_act(NULL);
@@ -399,8 +402,36 @@ void watch_switch_style(void)
     }
 }
 
+// Step 3: Color mode switching (button 2) - Auto/Manual color control
 void watch_switch_ui(void)
 {
-    // This function is deprecated, use watch_switch_style instead
-    watch_switch_style();
+    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
+    
+    // Toggle between auto and manual color mode
+    if (g_color_mode == COLOR_MODE_AUTO) {
+        g_color_mode = COLOR_MODE_MANUAL;
+        ESP_LOGI(TAG, "Switch to MANUAL color mode");
+        // In manual mode, cycle through colors only (no fluid)
+        if (g_watch_style == STYLE_FLUID) {
+            g_watch_style = STYLE_INITIAL;
+        }
+        create_watch_ui(scr);
+    } else {
+        g_color_mode = COLOR_MODE_AUTO;
+        ESP_LOGI(TAG, "Switch to AUTO color mode");
+        // In auto mode, full 5-segment cycle
+        if (g_watch_style == STYLE_FLUID) {
+            g_watch_style = STYLE_INITIAL;
+        }
+        create_watch_ui(scr);
+    }
 }
+
+// Step 3: Get current color mode
+color_mode_t get_color_mode(void)
+{
+    return g_color_mode;
+}
+
+
+
