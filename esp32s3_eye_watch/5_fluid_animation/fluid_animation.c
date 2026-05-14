@@ -8,7 +8,7 @@
  * - 粒子渲染到 Canvas
  * - 动画定时器
  * 
- * 注意：不包含重力方向控制（由 6_gravity_control 模块负责）
+ * 重力方向由 gravity_control 模块提供（参考 display_rotation 实现）
  */
 
 #include <stdio.h>
@@ -17,6 +17,8 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+
+#include "gravity_control.h"
 
 static const char *TAG = "fluid_animation";
 
@@ -34,7 +36,7 @@ static uint8_t *g_fluid_buf = NULL;
 static lv_obj_t *g_fluid_canvas = NULL;
 static lv_timer_t *g_fluid_timer = NULL;
 
-// 重力参数（默认向下）
+// 重力向量（从 gravity_control 模块获取）
 static float g_gravity_x = 0.0f;
 static float g_gravity_y = 0.08f;
 
@@ -78,13 +80,16 @@ void fluid_update(void)
 {
     float friction = 0.98f;
     float bounce = 0.6f;
+    
+    // 从 gravity_control 模块获取当前重力向量（参考 display_rotation）
+    gravity_control_get_vector(&g_gravity_x, &g_gravity_y);
 
     for (int i = 0; i < FLUID_NUM_PARTICLES; i++) {
         // 应用摩擦
         g_pvx[i] *= friction;
         g_pvy[i] *= friction;
 
-        // 应用重力（可被 gravity_control 模块修改）
+        // 应用重力（从 gravity_control 模块获取）
         g_pvx[i] += g_gravity_x;
         g_pvy[i] += g_gravity_y;
 
@@ -93,7 +98,7 @@ void fluid_update(void)
             if (i != j) {
                 float dx = g_px[j] - g_px[i];
                 float dy = g_py[j] - g_py[i];
-                float dist = sqrt(dx * dx + dy * dy);
+                float dist = sqrtf(dx * dx + dy * dy);
 
                 if (dist < 15.0f && dist > 0.1f) {
                     float force = (15.0f - dist) / 15.0f;
@@ -261,18 +266,16 @@ void fluid_destroy_ui(void)
     ESP_LOGI(TAG, "Fluid UI destroyed");
 }
 
-// 设置重力方向（供 gravity_control 模块调用）
-void fluid_set_gravity(float x, float y)
+// 获取当前重力向量（供外部查询）
+void fluid_get_gravity(float *gx, float *gy)
 {
-    g_gravity_x = x;
-    g_gravity_y = y;
-    ESP_LOGI(TAG, "Gravity set to (%.2f, %.2f)", g_gravity_x, g_gravity_y);
+    if (gx) *gx = g_gravity_x;
+    if (gy) *gy = g_gravity_y;
 }
 
-// 重置重力为默认（向下）
-void fluid_reset_gravity(void)
+// 更新重力向量（从 gravity_control 模块同步）
+void fluid_update_gravity_from_control(void)
 {
-    g_gravity_x = 0.0f;
-    g_gravity_y = 0.08f;
-    ESP_LOGI(TAG, "Gravity reset to default (down)");
+    gravity_control_get_vector(&g_gravity_x, &g_gravity_y);
+    ESP_LOGD(TAG, "Gravity synced from control: (%.2f, %.2f)", g_gravity_x, g_gravity_y);
 }

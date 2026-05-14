@@ -1,0 +1,21 @@
+# Build output
+build/
+build_output.txt
+
+# ESP-IDF generated files
+sdkconfig
+sdkconfig.*
+sdkconfig.old
+*.bin
+*.elf
+*.map
+
+# IDE files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.log
+*.tmp
